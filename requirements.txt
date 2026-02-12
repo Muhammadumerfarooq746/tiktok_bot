@@ -1,0 +1,5 @@
+# uiautomator2 - Android UI automation (Python 3.12 compatible)
+uiautomator2>=3.0.0
+
+# weditor - UI inspector for uiautomator2 (browser-based)
+weditor
