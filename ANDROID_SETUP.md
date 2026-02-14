@@ -30,7 +30,29 @@ adb version
 
 ---
 
-## 3. Install uiautomator2 (Python)
+## 3. Install system packages (avoids building lxml in pip)
+
+**Do this before `pip install`.** It installs a pre-built **lxml** so pip won’t try to compile it (which often fails on Termux):
+
+```bash
+pkg install python-lxml -y
+```
+
+Optional (for image support and building other packages if needed):
+
+```bash
+pkg install libjpeg-turbo libpng libtiff freetype libxml2 libxslt clang make net-tools -y
+```
+
+Then upgrade pip (recommended):
+
+```bash
+pip install --upgrade pip
+```
+
+---
+
+## 4. Install uiautomator2 and weditor (Python)
 
 In Termux:
 
@@ -46,7 +68,7 @@ pip install -r requirements.txt
 
 ---
 
-## 4. Enable Wireless Debugging on Your Phone
+## 5. Enable Wireless Debugging on Your Phone
 
 1. Open **Settings → About phone** and tap **Build number** 7 times to enable Developer options.
 2. Go to **Settings → Developer options**.
@@ -62,7 +84,7 @@ On **Android 11+** you must **pair** once, then **connect**:
 
 ---
 
-## 5. In Termux: Connect ADB to This Phone (localhost)
+## 6. In Termux: Connect ADB to This Phone (localhost)
 
 **One-time pairing (Android 11+):**
 
@@ -88,7 +110,7 @@ adb devices
 
 ---
 
-## 6. Install uiautomator2 Agent on the Phone (one time)
+## 7. Install uiautomator2 Agent on the Phone (one time)
 
 In Termux:
 
@@ -104,7 +126,7 @@ python -m uiautomator2 init --serial 127.0.0.1:5555
 
 ---
 
-## 7. Run Your Scripts
+## 8. Run Your Scripts
 
 In your Python script, connect to the local device:
 
@@ -132,8 +154,9 @@ python /path/to/your_script.py
 | Step              | Command / Action                          |
 |-------------------|-------------------------------------------|
 | Update Termux     | `pkg update && pkg upgrade -y`            |
-| Install stack     | `pkg install python android-tools -y`     |
-| Install u2        | `pip install uiautomator2`                |
+| Install stack     | `pkg install python android-tools -y`      |
+| Avoid lxml build  | `pkg install python-lxml -y`              |
+| Install u2        | `pip install -r requirements.txt`         |
 | Pair (once)       | `adb pair 127.0.0.1:PAIR_PORT`            |
 | Connect           | `adb connect 127.0.0.1:CONNECT_PORT`      |
 | Init agent        | `python -m uiautomator2 init`             |
@@ -142,6 +165,9 @@ python /path/to/your_script.py
 ---
 
 ## Troubleshooting
+
+- **“Failed building wheel for lxml”**  
+  Install the pre-built package first: `pkg install python-lxml -y`, then run `pip install -r requirements.txt` again.
 
 - **“device offline”**  
   Restart Wireless debugging or run `adb kill-server` then `adb connect 127.0.0.1:PORT` again.

@@ -1,5 +1,5 @@
-# uiautomator2 - Android UI automation (Python 3.12 compatible)
-uiautomator2>=3.0.0
+# Python packages (install with: pip install -r requirements.txt)
+# On Termux, run the system setup from ANDROID_SETUP.md first (including: pkg install python-lxml).
 
-# weditor - UI inspector for uiautomator2 (browser-based)
+uiautomator2>=3.0.0
 weditor
