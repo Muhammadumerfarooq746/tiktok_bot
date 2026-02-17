@@ -307,12 +307,22 @@ def get_ai_comment(caption: str) -> str | None:
     try:
         from groq import Groq
         client = Groq(api_key=api_key)
-        word_count = random.randint(4, 15)  # Vary length so comments don't look bot-like
+        # Vary length so comments don't look bot-like
+        word_count = random.randint(4, 15)
         prompt = (
-            f"Based on this video caption, write exactly one short comment. "
-            f"Caption: {caption!r}. "
-            f"Rules: one sentence only, calm and positive vibe, use exactly {word_count} words. "
-            f"Reply with only the comment, nothing else, no quotes or labels."
+            "You are helping write TikTok comments.\n\n"
+            "Caption:\n"
+            f"{caption!r}\n\n"
+            "Write exactly ONE natural sentence as a comment with these rules:\n"
+            f"- Between 4 and 15 words (aim for {word_count} words).\n"
+            "- Calm, understated approval (chill positive vibe).\n"
+            "- Not exaggerated, not spammy, no clichés, no emojis.\n"
+            "- Use UK spelling.\n"
+            "- Genuinely respond to the meaning of the caption.\n"
+            "- Include one exact word OR a 2–4 word phrase from the caption,\n"
+            "  woven in naturally into the sentence.\n"
+            "- Do NOT mention that you are an AI or a bot.\n\n"
+            "Output ONLY the final comment sentence and nothing else (no quotes, no labels)."
         )
         r = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -1254,10 +1264,10 @@ def post_random_comment(d, timeout=2.0, comment_text=None):
             time.sleep(0.4)
 
         # Do not tap Send — wait up to 2 min for user to tap Send; check every 5 sec
-        print("  Comment typed. You have 2 min to tap Send. Bot checks every 5 sec.")
+        print("  Comment typed. You have 2 min to tap Send. Bot checks about every 40 sec.")
         wait_sec = 120
-        check_interval = 5
-        for _ in range(wait_sec // check_interval):  # 24 checks
+        check_interval = 40
+        for _ in range(wait_sec // check_interval):  # 3 checks
             time.sleep(check_interval)
             current = _get_comment_edittext_text(d)
             # If EditText empty or no longer has our comment → user tapped Send
