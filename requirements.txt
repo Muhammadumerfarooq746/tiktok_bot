@@ -3,3 +3,10 @@
 
 uiautomator2>=3.0.0
 weditor
+pkg install python-cryptography -y
+pip install google-generativeai groq
+pkg install python-cryptography -y
+curl -sL https://raw.githubusercontent.com/Eutalix/android-pydantic-core/main/install_pydantic_core.sh | bash
+pip install google-generativeai groq
+curl -sL https://raw.githubusercontent.com/Eutalix/android-pydantic-core/main/install_pydantic_core.sh | bash
+pkg install python-cryptography -y

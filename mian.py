@@ -4,6 +4,7 @@ Run from your laptop with the phone connected via USB or wireless ADB.
 Scrolls feed, likes/comments ~10–20% of the time, tracks stats.
 Comments are chosen randomly from comments.txt.
 """
+import os
 import random
 import subprocess
 import uiautomator2 as u2
@@ -18,6 +19,9 @@ COMMENTS_FILE = SCRIPT_DIR / "comments.txt"
 # TikTok package name (official app from Play Store)
 TIKTOK_PACKAGE = "com.zhiliaoapp.musically"
 
+# Groq API key for AI comment (one sentence, 4–15 words; env GROQ_API_KEY overrides this)
+# GROQ_API_KEY = "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"  # e.g. "gsk_..." or set export GROQ_API_KEY=...
+GROQ_API_KEY = "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"
 # Multiple selectors for Friends tab (bottom nav) — try in order to avoid errors if one changes
 FRIENDS_SELECTORS = [
     ("text", "Friends"),
@@ -119,9 +123,42 @@ COMMENT_SELECTORS = [
     ("description", "Comment"),
     ("description", "Comments"),
     ("resourceId", "com.zhiliaoapp.musically:id/dxd"),  # Button "Read or add comments"
+    ("resourceId", "com.zhiliaoapp.musically:id/dz4"),  # Button "Read or add comments. N comments"
     ("resourceId", "com.zhiliaoapp.musically:id/dkc"),  # LinearLayout container (right-side icon)
     ("className_description", "android.widget.ImageView", "Comment"),
 ]
+
+# Caption text on video page (resource-id desc) — read only; comment is skipped if not found
+CAPTION_RESOURCE_ID = "com.zhiliaoapp.musically:id/desc"
+
+# Sponsored post label (resource-id h5j) — if found, skip like/comment and scroll to next
+SPONSORED_RESOURCE_ID = "com.zhiliaoapp.musically:id/h5j"
+
+
+def get_caption_text(d, timeout=2.0):
+    """Return the post caption text (resource-id desc). Does not click. Returns None if not found."""
+    try:
+        el = d(resourceId=CAPTION_RESOURCE_ID)
+        if el.exists(timeout=timeout):
+            try:
+                text = el.get_text() or el.info.get("text") or ""
+            except Exception:
+                text = el.info.get("text", "")
+            return (text or "").strip() or None
+    except Exception:
+        pass
+    try:
+        xpath = '//android.widget.TextView[@resource-id="com.zhiliaoapp.musically:id/desc"]'
+        if d.xpath(xpath).exists(timeout=timeout):
+            el = d.xpath(xpath)
+            try:
+                text = el.get_text() or el.attr("text") or ""
+            except Exception:
+                text = el.attr("text") or ""
+            return (text or "").strip() or None
+    except Exception:
+        pass
+    return None
 
 
 def prompt_user_settings():
@@ -219,7 +256,7 @@ def prompt_user_settings():
     mode_label = {
         "1": "Start from beginning (Friends)",
         "2": "Continue from current feed",
-        "3": "Start from Inbox tab",
+        "3": "Start from Inbox tab (open TikTok from scratch)",
         "4": "Open TikTok search by keyword",
     }.get(mode, "Start from beginning (Friends)")
     print(f"  Mode: {mode_label}")
@@ -259,6 +296,36 @@ def get_random_comment(path=None):
     """Pick a random comment from comments.txt. Returns None if file missing or empty."""
     comments = load_comments_from_file(path)
     return random.choice(comments) if comments else None
+
+
+def get_ai_comment(caption: str) -> str | None:
+    """Ask Groq for a one-sentence, calm positive comment based on the caption. Varies word count (4–15) to avoid bot detection. Returns None if no key or API error."""
+    api_key = (os.environ.get("GROQ_API_KEY") or GROQ_API_KEY or "").strip()
+    if not api_key:
+        print("  [warn] AI comment skipped: no GROQ_API_KEY set.")
+        return None
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+        word_count = random.randint(4, 15)  # Vary length so comments don't look bot-like
+        prompt = (
+            f"Based on this video caption, write exactly one short comment. "
+            f"Caption: {caption!r}. "
+            f"Rules: one sentence only, calm and positive vibe, use exactly {word_count} words. "
+            f"Reply with only the comment, nothing else, no quotes or labels."
+        )
+        r = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=80,
+        )
+        text = (r.choices[0].message.content or "").strip()
+        if not text:
+            print("  [warn] AI comment: empty response from API.")
+        return text if text else None
+    except Exception as e:
+        print(f"  [warn] AI comment error: {e}")
+        return None
 
 
 def click_friends_tab(d, timeout=3.0):
@@ -310,6 +377,8 @@ def click_more_button(d, timeout=3.0):
             else:
                 continue
             if el.exists(timeout=timeout):
+                sel = f"className={item[1]!r} description={item[2]!r}" if kind == "className_description" else f"{kind}={item[1]!r}"
+                print(f"  [xpath] More found (selector): {sel}")
                 el.click()
                 return True
         except Exception:
@@ -318,14 +387,18 @@ def click_more_button(d, timeout=3.0):
     for xpath in [
         '//*[@description="More"]',
         '//*[@resource-id="com.zhiliaoapp.musically:id/t3h"]',
+        '//*[@resource-id="com.zhiliaoapp.musically:id/t41"]',
         '//android.widget.ImageView[@resource-id="com.zhiliaoapp.musically:id/t3h"]',
+        '//android.widget.ImageView[@resource-id="com.zhiliaoapp.musically:id/t41"]',
         '//android.widget.TextView[@text="更多"]',
         '//*[@resource-id="com.zhiliaoapp.musically:id/du"]//*[@description="More"]',
         '//*[@resource-id="com.zhiliaoapp.musically:id/t4"]//*[@text="更多"]',
     ]:
         try:
-            d.xpath(xpath).click()
-            return True
+            if d.xpath(xpath).exists(timeout=0.5):
+                print(f"  [xpath] More found (xpath): {xpath}")
+                d.xpath(xpath).click()
+                return True
         except Exception:
             continue
     return False
@@ -486,6 +559,8 @@ def click_recently_uploaded_button(d, timeout=3.0):
             else:
                 continue
             if el.exists(timeout=timeout):
+                sel = f"className={item[1]!r} text={item[2]!r}" if kind == "className_text" else f"{kind}={item[1]!r}"
+                print(f"  [xpath] Recently uploaded found (selector): {sel}")
                 el.click()
                 return True
         except Exception:
@@ -496,8 +571,10 @@ def click_recently_uploaded_button(d, timeout=3.0):
         '//android.widget.Button[@text="Recently uploaded"]',
     ]:
         try:
-            d.xpath(xpath).click()
-            return True
+            if d.xpath(xpath).exists(timeout=0.5):
+                print(f"  [xpath] Recently uploaded found (xpath): {xpath}")
+                d.xpath(xpath).click()
+                return True
         except Exception:
             continue
     return False
@@ -867,6 +944,24 @@ def get_like_button(d, timeout=1.5):
     return None
 
 
+def is_sponsored_post(d, timeout=1.0):
+    """True if the current post shows 'Sponsored' (ad). Uses text first, then resource-id. Then we skip like/comment and scroll to next."""
+    try:
+        if d(text="Sponsored").exists(timeout=timeout):
+            return True
+        if d.xpath('//*[@text="Sponsored"]').exists(timeout=timeout):
+            return True
+        if d.xpath('//android.widget.Button[@text="Sponsored"]').exists(timeout=timeout):
+            return True
+        if d(resourceId=SPONSORED_RESOURCE_ID).exists(timeout=timeout):
+            return True
+        if d.xpath('//*[@resource-id="com.zhiliaoapp.musically:id/h5j"]').exists(timeout=timeout):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def is_post_already_liked(d, timeout=1.5):
     """True if the current post is already liked (then we skip like and comment)."""
     el = get_like_button(d, timeout=timeout)
@@ -941,9 +1036,15 @@ def click_comment(d, timeout=2.0):
         '//*[@content-desc="Comment"]',
         '//*[@content-desc="Comments"]',
         '//*[contains(@content-desc, "comment")]',
+        '//*[contains(@description, "Read or add comments")]',
+        '//*[contains(@content-desc, "Read or add comments")]',
+        '//android.widget.Button[contains(@description, "Read or add comments")]',
+        '//android.widget.Button[contains(@content-desc, "Read or add comments")]',
         '//*[@resource-id="com.zhiliaoapp.musically:id/dxd"]',
+        '//*[@resource-id="com.zhiliaoapp.musically:id/dz4"]',
         '//android.widget.LinearLayout[@resource-id="com.zhiliaoapp.musically:id/dkc"]',
         '//android.widget.Button[@resource-id="com.zhiliaoapp.musically:id/dxd"]',
+        '//android.widget.Button[@resource-id="com.zhiliaoapp.musically:id/dz4"]',
     ]:
         try:
             d.xpath(xpath).click()
@@ -985,25 +1086,30 @@ def get_comment_button(d, timeout=1.5):
     return None
 
 
-def has_zero_comments(d, timeout=1.5):
-    """Return True if the visible comment button indicates '0 comments' (then we skip commenting)."""
+def get_comment_button_description(d, timeout=1.5):
+    """Get the comment button's description (e.g. 'Read or add comments. 8 comments'). Returns None if not found."""
     el = get_comment_button(d, timeout=timeout)
     if el is None:
-        return False
+        return None
     try:
         info = el.info or {}
+        desc = (
+            info.get("contentDescription")
+            or info.get("content-desc")
+            or info.get("description")
+            or ""
+        )
+        return (desc or "").strip() or None
     except Exception:
+        return None
+
+
+def has_zero_comments(d, timeout=1.5):
+    """Return True if the visible comment button indicates '0 comments' (then we skip commenting)."""
+    desc = get_comment_button_description(d, timeout=timeout)
+    if desc is None:
         return False
-    desc = (
-        info.get("contentDescription")
-        or info.get("content-desc")
-        or info.get("description")
-        or ""
-    )
-    text = info.get("text") or ""
-    combined = f"{desc} {text}".lower()
-    # Examples: "Add and view comments. 0 comments"
-    return "0 comments" in combined
+    return "0 comments" in desc
 
 
 def is_comments_turned_off(d, timeout=1.5):
@@ -1111,12 +1217,28 @@ def ensure_on_feed(d, max_back=3):
             return
 
 
-def post_random_comment(d, timeout=2.0):
+def _get_comment_edittext_text(d):
+    """Get current text from the comment EditText. Returns None if element not found or error."""
+    try:
+        inp = d(className="android.widget.EditText")
+        if inp.exists(timeout=0.5):
+            text = inp.get_text() if hasattr(inp, "get_text") else None
+            if text is None:
+                text = (inp.info or {}).get("text") or ""
+            return (text or "").strip()
+    except Exception:
+        pass
+    return None
+
+
+def post_random_comment(d, timeout=2.0, comment_text=None):
     """
-    After comment sheet is open: type a random comment from comments.txt and tap Send.
-    Returns True if a comment was posted, False otherwise.
+    After comment sheet is open: type the given comment (e.g. from AI) or a random one from comments.txt.
+    Bot does NOT tap Send — you have 2 min to tap Send yourself. Every 5 sec it checks: if comment still
+    in EditText = not sent; if EditText empty or text gone = sent. After 2 min or when sent detected, goes back to feed.
+    Returns True if a comment was posted (send detected), False if timed out or error.
     """
-    comment = get_random_comment()
+    comment = (comment_text or "").strip() or get_random_comment()
     if not comment:
         return False
     try:
@@ -1130,30 +1252,33 @@ def post_random_comment(d, timeout=2.0):
         else:
             d.send_keys(comment)
             time.sleep(0.4)
-        # Tap red Send button after writing comment — from screenshot: id/cex (android.widget.Button)
-        send_selectors = [
-            d(resourceId="com.zhiliaoapp.musically:id/cex"),
-        ]
-        send_xpaths = [
-            '//*[@resource-id="com.zhiliaoapp.musically:id/cex"]',
-            '//android.widget.Button[@resource-id="com.zhiliaoapp.musically:id/cex"]',
-        ]
-        for _ in range(2):  # retry once
-            for sel in send_selectors:
-                if sel.exists(timeout=1.0):
-                    sel.click()
-                    time.sleep(0.3)
-                    return True
-            for xpath in send_xpaths:
-                try:
-                    d.xpath(xpath).click()
-                    time.sleep(0.3)
-                    return True
-                except Exception:
-                    continue
-            time.sleep(0.3)
+
+        # Do not tap Send — wait up to 2 min for user to tap Send; check every 5 sec
+        print("  Comment typed. You have 2 min to tap Send. Bot checks every 5 sec.")
+        wait_sec = 120
+        check_interval = 5
+        for _ in range(wait_sec // check_interval):  # 24 checks
+            time.sleep(check_interval)
+            current = _get_comment_edittext_text(d)
+            # If EditText empty or no longer has our comment → user tapped Send
+            if current is None or (current or "").strip() == "" or comment not in (current or ""):
+                print("  Send detected — going back to feed.")
+                return True
+            # Else comment still in EditText — user hasn't sent yet
+
+        # 2 min elapsed, comment still in EditText — user didn't tap Send; go back twice
+        print("  2 min elapsed, Send not detected — going back to feed.")
+        d.press("back")
+        time.sleep(0.4)
+        d.press("back")
+        time.sleep(0.4)
         return False
     except Exception:
+        try:
+            d.press("back")
+            time.sleep(0.4)
+        except Exception:
+            pass
         return False
 
 
@@ -1176,6 +1301,11 @@ def swipe_up_suggested_page(d, duration=0.9):
 
 def like_and_comment_on_open_video(d, like_chance, comment_on_liked_chance, label_prefix=""):
     """Apply like/comment logic on the CURRENTLY open video (used from suggested-friends mode)."""
+    # If Sponsored (ad), skip like/comment
+    if is_sponsored_post(d):
+        if label_prefix:
+            print(f"{label_prefix}Sponsored post — skip")
+        return
     # If already liked, we don't like or comment
     if is_post_already_liked(d):
         if label_prefix:
@@ -1196,22 +1326,37 @@ def like_and_comment_on_open_video(d, like_chance, comment_on_liked_chance, labe
 
     try:
         if did_like and random.random() < comment_on_liked_chance:
-            # Skip if the visible comment button shows "0 comments"
-            if has_zero_comments(d):
+            # Before opening comment: print description; skip if "0 comments"
+            comment_desc = get_comment_button_description(d, timeout=1.5)
+            if comment_desc is not None and label_prefix:
+                print(f"{label_prefix}Comment button: {comment_desc}")
+            if comment_desc and "0 comments" in comment_desc:
                 if label_prefix:
-                    print(f"{label_prefix}0 comments shown — skipping comment on this video")
+                    print(f"{label_prefix}0 comments — skip")
                 return
-            if click_comment(d):
-                time.sleep(1.0)
-                if is_comments_turned_off(d):
-                    if label_prefix:
-                        print(f"{label_prefix}Comments off — no comment")
-                else:
-                    if post_random_comment(d) and label_prefix:
-                        print(f"{label_prefix}Comment posted on suggested-friends video")
-                # Back from comment sheet to video
-                d.press("back")
-                time.sleep(0.4)
+            # Only comment if caption is found; otherwise skip comments
+            caption_text = get_caption_text(d, timeout=1.5)
+            if caption_text is None:
+                if label_prefix:
+                    print(f"{label_prefix}No caption found — skip comments")
+            else:
+                if label_prefix:
+                    print(f"{label_prefix}Caption: {caption_text}")
+                ai_comment = get_ai_comment(caption_text)
+                if ai_comment and label_prefix:
+                    print(f"{label_prefix}AI comment: {ai_comment}")
+                time.sleep(0.3)
+                if click_comment(d):
+                    time.sleep(1.0)
+                    if is_comments_turned_off(d):
+                        if label_prefix:
+                            print(f"{label_prefix}Comments off — no comment")
+                    else:
+                        if post_random_comment(d, comment_text=ai_comment) and label_prefix:
+                            print(f"{label_prefix}Comment posted on suggested-friends video")
+                    # Back from comment sheet to video
+                    d.press("back")
+                    time.sleep(0.4)
     except Exception as e:
         if label_prefix:
             print(f"{label_prefix}Comment error: {e}")
@@ -1315,8 +1460,14 @@ def main():
                 )
                 return
     elif mode == "3":
-        # Start from Inbox tab
-        print(f"\nOpening TikTok ({TIKTOK_PACKAGE})...")
+        # Start from Inbox tab — open TikTok from scratch (force-stop then launch)
+        print(f"\nOpening TikTok from scratch (force-stop then launch)...")
+        try:
+            d.app_stop(TIKTOK_PACKAGE)
+            time.sleep(1.0)
+        except Exception as e:
+            print(f"  [warn] Force-stop: {e}")
+        print(f"Launching {TIKTOK_PACKAGE}...")
         d.app_start(TIKTOK_PACKAGE)
         print("TikTok launched.")
         time.sleep(2)
@@ -1371,35 +1522,36 @@ def main():
                 )
                 time.sleep(1.5)
                 # Wait for search UI — if "Recently uploaded" is visible, use it; else More → Filter/Adjust → Latest → Apply
+                # Use short timeouts (1.5s) so we fail fast when element is missing and don't block long before clicking More
                 time.sleep(2.0)
-                if click_recently_uploaded_button(d, timeout=5.0):
+                if click_recently_uploaded_button(d, timeout=1.5):
                     print(f"  [action] Clicked Recently uploaded for {kw!r} (skipped More flow)")
                 else:
-                    if click_more_button(d, timeout=5.0):
+                    if click_more_button(d, timeout=1.5):
                         print(f"  [action] Clicked More for {kw!r}")
                     else:
                         print(f"  [warn] More button not found for {kw!r}")
-                    time.sleep(1.0)
-                    if click_filter_or_adjust_button(d, timeout=5.0):
+                    time.sleep(0.8)
+                    if click_filter_or_adjust_button(d, timeout=1.5):
                         print(f"  [action] Clicked Filter/Adjust for {kw!r}")
                     else:
                         print(f"  [warn] Filter/Adjust button not found for {kw!r}")
-                    time.sleep(1.0)
+                    time.sleep(0.8)
                     # Try Latest first; if not found try Past 24 hours; if neither found go back (no Apply)
                     filter_clicked = False
-                    if click_latest_button(d, timeout=5.0):
+                    if click_latest_button(d, timeout=1.5):
                         print(f"  [action] Clicked Latest for {kw!r}")
                         filter_clicked = True
-                    elif click_past_24_hours_button(d, timeout=5.0):
+                    elif click_past_24_hours_button(d, timeout=1.5):
                         print(f"  [action] Clicked Past 24 hours for {kw!r} (Latest not found)")
                         filter_clicked = True
                     else:
                         print(f"  [warn] Neither Latest nor Past 24 hours found — closing filter (Back)")
                         d.press("back")
                         time.sleep(0.5)
-                    time.sleep(1.0)
+                    time.sleep(0.8)
                     if filter_clicked:
-                        if click_apply_button(d, timeout=5.0):
+                        if click_apply_button(d, timeout=1.5):
                             print(f"  [action] Clicked Apply for {kw!r}")
                         else:
                             print(f"  [warn] Apply button not found for {kw!r}")
@@ -1408,7 +1560,7 @@ def main():
                 print_lup_children(d)
                 # Then click the first FrameLayout child under lup (first result block)
                 time.sleep(0.8)
-                if click_first_lup_item_frame(d, timeout=5.0):
+                if click_first_lup_item_frame(d, timeout=2.0):
                     print(f"  [action] Clicked first FrameLayout item under lup for {kw!r}")
                 else:
                     print(f"  [warn] Could not click first FrameLayout item under lup for {kw!r}")
@@ -1447,6 +1599,13 @@ def main():
                 time.sleep(0.6)
                 continue
 
+            # If Sponsored (ad) post, skip like/comment and scroll to next
+            if is_sponsored_post(d):
+                print(f"  [{i+1}/{total_scrolls}] Sponsored post — skip, scroll")
+                swipe_up_one_page(d)
+                time.sleep(0.6)
+                continue
+
             # Like some % of posts (only if not already liked)
             did_like = False
             try:
@@ -1459,23 +1618,39 @@ def main():
             except Exception:
                 print(f"  [{i+1}/{total_scrolls}] Like button not found / error — skip, will scroll")
 
-            # Comment on only some % of the posts we just liked
+            # Comment on only some % of the posts we just liked (only if caption is found)
             try:
                 if did_like and random.random() < comment_on_liked_chance:
-                    if click_comment(d):
-                        time.sleep(1.0)
-                        if is_comments_turned_off(d):
-                            print(f"  [{i+1}/{total_scrolls}] Comments off — back to feed")
+                    caption_text = get_caption_text(d, timeout=1.5)
+                    if caption_text is None:
+                        print(f"  [{i+1}/{total_scrolls}] No caption found — skip comments")
+                    else:
+                        print(f"  [{i+1}/{total_scrolls}] Caption: {caption_text}")
+                        # Before opening comment: print description; skip if "0 comments"
+                        comment_desc = get_comment_button_description(d, timeout=1.5)
+                        if comment_desc is not None:
+                            print(f"  [{i+1}/{total_scrolls}] Comment button: {comment_desc}")
+                        if comment_desc and "0 comments" in comment_desc:
+                            print(f"  [{i+1}/{total_scrolls}] 0 comments — skip")
                         else:
-                            if post_random_comment(d):
-                                comments_done += 1
-                                print(f"  [{i+1}/{total_scrolls}] Comment posted")
-                            else:
-                                print(f"  [{i+1}/{total_scrolls}] Comment opened (post skipped)")
-                            time.sleep(0.5)
-                        d.press("back")
-                        time.sleep(0.4)
-                    time.sleep(0.3)
+                            ai_comment = get_ai_comment(caption_text)
+                            if ai_comment:
+                                print(f"  [{i+1}/{total_scrolls}] AI comment: {ai_comment}")
+                            time.sleep(0.3)
+                            if click_comment(d):
+                                time.sleep(1.0)
+                                if is_comments_turned_off(d):
+                                    print(f"  [{i+1}/{total_scrolls}] Comments off — back to feed")
+                                else:
+                                    if post_random_comment(d, comment_text=ai_comment):
+                                        comments_done += 1
+                                        print(f"  [{i+1}/{total_scrolls}] Comment posted")
+                                    else:
+                                        print(f"  [{i+1}/{total_scrolls}] Comment opened (post skipped)")
+                                    time.sleep(0.5)
+                                d.press("back")
+                                time.sleep(0.4)
+                            time.sleep(0.3)
             except Exception:
                 print(f"  [{i+1}/{total_scrolls}] Comment button not found / error — skip, will scroll")
                 try:
