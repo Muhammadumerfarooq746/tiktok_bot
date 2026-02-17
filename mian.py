@@ -20,7 +20,7 @@ COMMENTS_FILE = SCRIPT_DIR / "comments.txt"
 TIKTOK_PACKAGE = "com.zhiliaoapp.musically"
 
 # Groq API key for AI comment (one sentence, 4–15 words; env GROQ_API_KEY overrides this)
-GROQ_API_KEY = "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"
+GROQ_API_KEY = ""
 # Multiple selectors for Friends tab (bottom nav) — try in order to avoid errors if one changes
 FRIENDS_SELECTORS = [
     ("text", "Friends"),
