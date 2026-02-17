@@ -20,10 +20,8 @@ COMMENTS_FILE = SCRIPT_DIR / "comments.txt"
 TIKTOK_PACKAGE = "com.zhiliaoapp.musically"
 
 # Groq API key for AI comment (one sentence, 4–15 words; env GROQ_API_KEY overrides this)
-# IMPORTANT: Do NOT commit real keys. Keep this empty in git and set the
-# real value via an environment variable, e.g.:
-#   export GROQ_API_KEY="gsk_..."
-GROQ_API_KEY = ""
+# GROQ_API_KEY = "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"  # e.g. "gsk_..." or set export GROQ_API_KEY=...
+GROQ_API_KEY = "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"
 # Multiple selectors for Friends tab (bottom nav) — try in order to avoid errors if one changes
 FRIENDS_SELECTORS = [
     ("text", "Friends"),
