@@ -23,7 +23,7 @@ TIKTOK_PACKAGE = "com.zhiliaoapp.musically"
 try:
     from config import GROQ_API_KEY
 except ImportError:
-    GROQ_API_KEY = "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"
+    GROQ_API_KEY = ""
 # Multiple selectors for Friends tab (bottom nav) — try in order to avoid errors if one changes
 FRIENDS_SELECTORS = [
     ("text", "Friends"),
