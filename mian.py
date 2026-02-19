@@ -19,8 +19,11 @@ COMMENTS_FILE = SCRIPT_DIR / "comments.txt"
 # TikTok package name (official app from Play Store)
 TIKTOK_PACKAGE = "com.zhiliaoapp.musically"
 
-# Groq API key for AI comment (one sentence, 4–15 words; env GROQ_API_KEY overrides this)
-GROQ_API_KEY = ""
+# Groq API key: load from config.py first (file is gitignored), else use env GROQ_API_KEY
+try:
+    from config import GROQ_API_KEY
+except ImportError:
+    GROQ_API_KEY = "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"
 # Multiple selectors for Friends tab (bottom nav) — try in order to avoid errors if one changes
 FRIENDS_SELECTORS = [
     ("text", "Friends"),
@@ -1215,11 +1218,11 @@ def ensure_on_feed(d, max_back=3):
             except Exception:
                 has_edit = False
             if has_edit and (like_el is not None or comment_el is not None):
-                print("[info] ensure_on_feed: Search/feed screen detected (EditText + Like/Comment); no Back needed.")
                 return
 
             if not is_in_comment_sheet(d):
                 return
+            print("[info] ensure_on_feed: Leaving comment sheet (Back).")
             d.press("back")
             time.sleep(0.4)
         except Exception:
@@ -1240,22 +1243,24 @@ def _get_comment_edittext_text(d):
     return None
 
 
-def post_random_comment(d, timeout=2.0, comment_text=None):
+def post_random_comment(d, timeout=2.0, comment_text=None, comment_button_description=None):
     """
     After comment sheet is open: type the given comment (e.g. from AI) or a random one from comments.txt.
-    Bot does NOT tap Send — you have 2 min to tap Send yourself. Every 5 sec it checks: if comment still
-    in EditText = not sent; if EditText empty or text gone = sent. After 2 min or when sent detected, goes back to feed.
+    If comment_button_description contains "0 comments", do NOT click the EditText — just type (no focus click).
+    Bot does NOT tap Send — you have 2 min to tap Send yourself. Every 40 sec it checks if comment still
+    in EditText; when gone or 2 min elapsed, goes back to feed.
     Returns True if a comment was posted (send detected), False if timed out or error.
     """
     comment = (comment_text or "").strip() or get_random_comment()
     if not comment:
         return False
     try:
-        # Focus/click comment input (EditText) then type
+        zero_comments = comment_button_description and "0 comments" in str(comment_button_description)
         inp = d(className="android.widget.EditText")
         if inp.exists(timeout=timeout):
-            inp.click()
-            time.sleep(0.3)
+            if not zero_comments:
+                inp.click()
+                time.sleep(0.3)
             inp.set_text(comment)
             time.sleep(0.4)
         else:
@@ -1335,14 +1340,10 @@ def like_and_comment_on_open_video(d, like_chance, comment_on_liked_chance, labe
 
     try:
         if did_like and random.random() < comment_on_liked_chance:
-            # Before opening comment: print description; skip if "0 comments"
+            # Before opening comment: print description (do not skip even if "0 comments")
             comment_desc = get_comment_button_description(d, timeout=1.5)
             if comment_desc is not None and label_prefix:
                 print(f"{label_prefix}Comment button: {comment_desc}")
-            if comment_desc and "0 comments" in comment_desc:
-                if label_prefix:
-                    print(f"{label_prefix}0 comments — skip")
-                return
             # Only comment if caption is found; otherwise skip comments
             caption_text = get_caption_text(d, timeout=1.5)
             if caption_text is None:
@@ -1357,11 +1358,15 @@ def like_and_comment_on_open_video(d, like_chance, comment_on_liked_chance, labe
                 time.sleep(0.3)
                 if click_comment(d):
                     time.sleep(1.0)
-                    if is_comments_turned_off(d):
+                    # When button said "0 comments", skip is_comments_turned_off (empty sheet can false-positive)
+                    if comment_desc and "0 comments" in comment_desc:
+                        if post_random_comment(d, comment_text=ai_comment, comment_button_description=comment_desc) and label_prefix:
+                            print(f"{label_prefix}Comment posted on suggested-friends video")
+                    elif is_comments_turned_off(d):
                         if label_prefix:
                             print(f"{label_prefix}Comments off — no comment")
                     else:
-                        if post_random_comment(d, comment_text=ai_comment) and label_prefix:
+                        if post_random_comment(d, comment_text=ai_comment, comment_button_description=comment_desc) and label_prefix:
                             print(f"{label_prefix}Comment posted on suggested-friends video")
                     # Back from comment sheet to video
                     d.press("back")
@@ -1635,31 +1640,36 @@ def main():
                         print(f"  [{i+1}/{total_scrolls}] No caption found — skip comments")
                     else:
                         print(f"  [{i+1}/{total_scrolls}] Caption: {caption_text}")
-                        # Before opening comment: print description; skip if "0 comments"
+                        # Before opening comment: print description (do not skip even if "0 comments")
                         comment_desc = get_comment_button_description(d, timeout=1.5)
                         if comment_desc is not None:
                             print(f"  [{i+1}/{total_scrolls}] Comment button: {comment_desc}")
-                        if comment_desc and "0 comments" in comment_desc:
-                            print(f"  [{i+1}/{total_scrolls}] 0 comments — skip")
-                        else:
-                            ai_comment = get_ai_comment(caption_text)
-                            if ai_comment:
-                                print(f"  [{i+1}/{total_scrolls}] AI comment: {ai_comment}")
-                            time.sleep(0.3)
-                            if click_comment(d):
-                                time.sleep(1.0)
-                                if is_comments_turned_off(d):
-                                    print(f"  [{i+1}/{total_scrolls}] Comments off — back to feed")
+                        ai_comment = get_ai_comment(caption_text)
+                        if ai_comment:
+                            print(f"  [{i+1}/{total_scrolls}] AI comment: {ai_comment}")
+                        time.sleep(0.3)
+                        if click_comment(d):
+                            time.sleep(1.0)
+                            # When button said "0 comments", don't check is_comments_turned_off (empty sheet can false-positive)
+                            if comment_desc and "0 comments" in comment_desc:
+                                if post_random_comment(d, comment_text=ai_comment, comment_button_description=comment_desc):
+                                    comments_done += 1
+                                    print(f"  [{i+1}/{total_scrolls}] Comment posted")
                                 else:
-                                    if post_random_comment(d, comment_text=ai_comment):
-                                        comments_done += 1
-                                        print(f"  [{i+1}/{total_scrolls}] Comment posted")
-                                    else:
-                                        print(f"  [{i+1}/{total_scrolls}] Comment opened (post skipped)")
-                                    time.sleep(0.5)
-                                d.press("back")
-                                time.sleep(0.4)
-                            time.sleep(0.3)
+                                    print(f"  [{i+1}/{total_scrolls}] Comment opened (post skipped)")
+                                time.sleep(0.5)
+                            elif is_comments_turned_off(d):
+                                print(f"  [{i+1}/{total_scrolls}] Comments off — back to feed")
+                            else:
+                                if post_random_comment(d, comment_text=ai_comment, comment_button_description=comment_desc):
+                                    comments_done += 1
+                                    print(f"  [{i+1}/{total_scrolls}] Comment posted")
+                                else:
+                                    print(f"  [{i+1}/{total_scrolls}] Comment opened (post skipped)")
+                                time.sleep(0.5)
+                            d.press("back")
+                            time.sleep(0.4)
+                        time.sleep(0.3)
             except Exception:
                 print(f"  [{i+1}/{total_scrolls}] Comment button not found / error — skip, will scroll")
                 try:
